@@ -10,10 +10,12 @@ on instead of a blank repo and a wiki tab.
 
 ## What this gives you
 
-- **A working example** — `examples/01-counter/`. WASI 0.2
-  tick-circuit + aggregator + Soroban handler + counter contract,
-  driven by a 30-second cron, signed by an ed25519 operator quorum,
-  settled on Stellar testnet. ~600 LOC end-to-end.
+- **Two working examples** — `examples/01-counter/` (cron trigger →
+  counter contract) and `examples/02-event-watcher/` (Stellar contract
+  event → message-board contract). Both ship WASI 0.2 circuit +
+  aggregator + Soroban handler + application contract, signed by an
+  ed25519 operator quorum, settled on Stellar testnet. ~600 LOC each
+  end-to-end.
 - **The security stack, vendored** — `vendor/contracts/ed25519-security`
   and `vendor/contracts/ed25519-verification`, byte-identical copies of
   the audited contracts from
@@ -142,6 +144,7 @@ Project-Starter-Pack/
         ├── service/
         │   └── build-service.sh    # one workflow: cron → tick-circuit → aggregator → handler
         └── wit-definitions/        # warpdrive-vectr + aggregator worlds
+    └── 02-event-watcher/           # Stellar event watcher — same layout, set-stellar trigger
 ```
 
 Each example is self-contained: its own `Taskfile.yml`,
@@ -227,6 +230,68 @@ component). Real workloads will swap the cron trigger for a Stellar
 event, an EVM event, or a Round 2 composition event, and replace the
 `{ts}` payload with whatever shape their handler expects — the rest
 of the wiring stays the same.
+
+## What's in `examples/02-event-watcher/`
+
+A self-contained Stellar contract event watcher. The same
+`MessageBoard` contract owns BOTH ends of the loop: anyone calls
+`publish(msg)` from any wallet, the contract emits a Soroban event
+with topic `(Symbol("msg"), U64(msg_id))` and value `String(msg)`,
+the operator quorum observes the event, decodes it in a WASI circuit,
+signs the result with ed25519, and the stellar-handler verifies the
+quorum and calls `MessageBoard.record_signed(msg_id, msg)` on the
+same contract. The recorded message is then queryable by id from
+anyone. Round-trip latency: ~5–15 s after `publish` (one ledger
+close per direction).
+
+```
+user wallet (Freighter / CLI)
+   │  publish(msg)
+   ▼
+┌──────────────────────────────────────────────────────────────┐
+│ contracts/message-board  (Soroban, testnet)                  │
+│   publish(msg) → mints msg_id, emits Soroban event with      │
+│     topic[0]=Symbol("msg"), topic[1]=U64(msg_id),            │
+│     value=String(msg)                                        │
+└──────────────────────────────────────────────────────────────┘
+   │  topic-filter match (set-stellar --topic-symbol msg --topic wildcard)
+   ▼
+┌──────────────────────────────────────────────────────────────┐
+│ components/event-watcher-circuit  - WASI 0.2                 │
+│   • decodes topic_segments + event.value                     │
+│   • emits XDR-encoded RecordPayload { msg, msg_id }          │
+└──────────────────────────────────────────────────────────────┘
+   │  ed25519 quorum signs, host quorum-collapses by salt=msg_id
+   ▼
+┌──────────────────────────────────────────────────────────────┐
+│ contracts/stellar-handler.verify_xlm                         │
+│   → contracts/message-board.record_signed(msg_id, msg)       │
+│   (handler.require_auth() gates the cross-contract call)     │
+└──────────────────────────────────────────────────────────────┘
+   │
+   ▼
+anyone: recorded(msg_id) → Some(msg)
+```
+
+Same five-layer pattern as `01-counter`. The only thing that
+changed is the trigger: `set-cron` becomes `set-stellar
+--topic-symbol msg --topic wildcard`, and the circuit's job switches
+from "read scheduled time" to "decode Soroban event topics + value".
+The handler dispatcher, aggregator, and operator/quorum plumbing
+are byte-identical to 01-counter.
+
+One thing this example demonstrates that's worth calling out:
+**predict-then-deploy bootstrapping**. `MessageBoard` takes the
+handler address at construction, the handler takes the
+`MessageBoard` address at construction — a cyclic dependency. The
+Taskfile resolves it by predicting the handler's address from
+`stellar contract id wasm --salt $SALT --source-account
+$DEPLOYER_ADDRESS` BEFORE either deploys, passing the predicted
+address to `MessageBoard`'s constructor, and then deploying the
+handler with the same salt so it lands at exactly the predicted
+address. A post-deploy assertion catches salt/source drift between
+the two steps. The pattern is reusable for any pair of contracts
+that need to know each other's addresses at construction.
 
 ## Where to go for more advanced patterns
 

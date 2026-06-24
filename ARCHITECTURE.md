@@ -47,10 +47,12 @@ The kinds the Vectr supports today:
   Sepolia `TwapRequested(string,uint32,address)` logs and turns them
   into Stellar requests.
 
-`AtprotoEvent` and `BlockInterval` triggers also exist. Atproto wires a
-firehose subscription; block-interval fires every N ledgers of a
-configured chain. Neither shows up in the Starter Pack's `01-counter`
-example — the three above cover almost every integration.
+`AtprotoEvent` and `BlockInterval` triggers also exist. Atproto wires
+a firehose subscription; block-interval fires every N ledgers of a
+configured chain. Neither shows up in the Starter Pack's examples —
+the three above cover almost every integration. The pack ships two
+of the three out of the box: `01-counter` (Cron) and `02-event-watcher`
+(StellarContractEvent).
 
 Which one to use:
 
@@ -230,8 +232,12 @@ Verified::new(event_id).publish(&env);
 ```
 
 The Starter Pack's `01-counter` handler is a degenerate case of the
-same shape: one variant (`Tick { ts }`), one call (`counter.tick(ts)`),
-~150 LOC of contract.
+same shape: one variant (`Tick { ts }`), one call
+(`counter.tick(ts)`), ~150 LOC of contract. `02-event-watcher`'s
+handler is the same skeleton with a different inner payload
+(`Record { msg, msg_id }`) and a different downstream call
+(`message_board.record_signed(msg_id, msg)`) — the dispatch
+structure carries over.
 
 ### 5. Security (ed25519-security + ed25519-verification)
 

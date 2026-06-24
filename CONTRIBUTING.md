@@ -19,7 +19,7 @@ The pack is one repo in a small org. Pick the closest:
 | Symptom | Where to file |
 |---|---|
 | The pack's docs are wrong / unclear / missing a step. | This repo. |
-| `examples/01-counter/` or `scripts/*` misbehave. | This repo. |
+| `examples/*` or `scripts/*` misbehave. | This repo. |
 | The `warpdrive` daemon crashes / a CLI subcommand is broken. | [warp-driver/warpdrive](https://github.com/warp-driver/warpdrive). |
 | `ed25519-security` / `ed25519-verification` / `project-root` behave wrong. | [warp-driver/warpdrive-contracts](https://github.com/warp-driver/warpdrive-contracts) (the vendored copies here are byte-identical, so the fix has to land upstream first). |
 | `warpdrive-stellar-middleware` container misbehaves. | [warp-driver/warpdrive-stellar-middleware](https://github.com/warp-driver/warpdrive-stellar-middleware). |
@@ -30,7 +30,8 @@ not an issue — issues are for things with a fix.
 ## How to add an example to the pack
 
 Examples live under `examples/NN-name/`, numbered in the order added
-(`01-counter/` is the MVP; the next is `02-…`). `new-project.sh`
+(`01-counter/` is the MVP, `02-event-watcher/` adds the Stellar
+contract event trigger; the next slot is `03-…`). `new-project.sh`
 selects by directory name and the top-level README's "Where to go for
 more advanced patterns" table is sorted by complexity. Mirror the
 `01-counter/` layout exactly:

@@ -13,8 +13,15 @@ handler, and an `ed25519-verification` quorum are.
 
 The walkthrough drives `examples/01-counter/` — the smallest end-to-end
 integration the Pack ships. Once you have it producing ticks on chain,
-copy the directory (`./scripts/new-project.sh counter ../my-thing`) and
-swap the cron-circuit + counter contract for your own logic.
+copy the directory (`./scripts/new-project.sh 01-counter ../my-thing`)
+and swap the cron-circuit + counter contract for your own logic.
+
+`examples/02-event-watcher/` follows the EXACT same task surface
+(`task deploy`, `task run-node`, `task wire-service`,
+`task register-signer`); the only differences are the trigger
+(Stellar contract event instead of cron) and the application
+contract (`message-board` instead of `counter`). Once you can drive
+01-counter, 02 needs no new commands.
 
 ---
 
