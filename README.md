@@ -261,13 +261,6 @@ test harness that spins up a node, runs a full cron cycle, and
 asserts the counter advances. Frontend skeleton (React + Vite +
 Freighter wiring) once a real example needs one.
 
-**Out of scope for the first cut.** Web2 / atproto event triggers
-(planned but not designed yet), EVM bridge example (use oracle-demo's
-`eth-bridge-circuit` directly until a distilled version lands), and
-production-grade observability (Prometheus exporters, log shipping,
-alerting) — `DEPLOY.md` covers what to run in a tmux/systemd setup
-and what to monitor manually.
-
 ## Community
 
 Help, design discussion, and "is this the right pattern for X?"
