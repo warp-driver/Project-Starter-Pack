@@ -6,12 +6,11 @@ WarpDrive integration after this lands."
 
 ## Where to get help
 
-Public chat: `<TBA — see project board>`. The link will land on the
-WarpDrive org's project board with the first tagged Starter Pack
-release; until then, open a GitHub discussion (below) or DM a
-maintainer on [warp-driver](https://github.com/warp-driver). The chat
-is for design questions and "is this the right pattern for X?" — it
-is NOT a substitute for a bug report.
+Public chat: [WarpDrive thread on the Stellar Developer Discord](https://discord.com/channels/897514728459468821/1519279126610055218).
+It's where design questions and "is this the right pattern for X?"
+conversations happen. For anything that needs a fix — a bug, a broken
+task, a docs gap — open a GitHub discussion or issue (below); chat
+is for the open-ended stuff that doesn't yet have a clear ask.
 
 ## Issues / discussions
 

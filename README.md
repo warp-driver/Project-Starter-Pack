@@ -271,8 +271,8 @@ and what to monitor manually.
 ## Community
 
 Help, design discussion, and "is this the right pattern for X?"
-questions belong in the public WarpDrive chat — link, channel
-conventions, and office-hours cadence are in
+questions belong in the [WarpDrive thread on the Stellar Developer Discord](https://discord.com/channels/897514728459468821/1519279126610055218)
+ — channel conventions and office-hours cadence are documented in
 [`CONTRIBUTING.md`](./CONTRIBUTING.md). Bug reports and feature
 requests go to the WarpDrive GitHub org
 ([warp-driver](https://github.com/warp-driver)) — issues filed
