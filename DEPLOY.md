@@ -16,12 +16,15 @@ integration the Pack ships. Once you have it producing ticks on chain,
 copy the directory (`./scripts/new-project.sh 01-counter ../my-thing`)
 and swap the cron-circuit + counter contract for your own logic.
 
-`examples/02-event-watcher/` follows the EXACT same task surface
-(`task deploy`, `task run-node`, `task wire-service`,
-`task register-signer`); the only differences are the trigger
-(Stellar contract event instead of cron) and the application
-contract (`message-board` instead of `counter`). Once you can drive
-01-counter, 02 needs no new commands.
+`examples/02-event-watcher/` and `examples/03-multi-round/` follow
+the EXACT same task surface (`task deploy`, `task run-node`,
+`task wire-service`, `task register-signer`/`register-signers`).
+02 differs from 01 only in trigger (Stellar contract event vs cron)
+and application contract (message-board vs counter). 03 adds a
+second workflow and a second circuit but the deploy commands are
+the same — and 03 specifically needs `OPERATORS=2` to demonstrate
+the multi-round accumulator (1 operator + 1/1 quorum collapses the
+demo). Once you can drive 01, 02 and 03 need no new commands.
 
 ---
 

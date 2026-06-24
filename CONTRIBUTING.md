@@ -31,7 +31,8 @@ not an issue — issues are for things with a fix.
 
 Examples live under `examples/NN-name/`, numbered in the order added
 (`01-counter/` is the MVP, `02-event-watcher/` adds the Stellar
-contract event trigger; the next slot is `03-…`). `new-project.sh`
+contract event trigger, `03-multi-round/` adds two-round composition;
+the next slot is `04-…`). `new-project.sh`
 selects by directory name and the top-level README's "Where to go for
 more advanced patterns" table is sorted by complexity. Mirror the
 `01-counter/` layout exactly:

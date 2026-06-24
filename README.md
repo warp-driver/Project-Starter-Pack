@@ -10,12 +10,14 @@ on instead of a blank repo and a wiki tab.
 
 ## What this gives you
 
-- **Two working examples** — `examples/01-counter/` (cron trigger →
-  counter contract) and `examples/02-event-watcher/` (Stellar contract
-  event → message-board contract). Both ship WASI 0.2 circuit +
-  aggregator + Soroban handler + application contract, signed by an
-  ed25519 operator quorum, settled on Stellar testnet. ~600 LOC each
-  end-to-end.
+- **Three working examples** — `examples/01-counter/` (cron trigger →
+  counter contract), `examples/02-event-watcher/` (Stellar contract
+  event → message-board contract), and `examples/03-multi-round/`
+  (cron-driven multi-round composition with a per-Vectr Round 1
+  bundle accumulator and a quorum-collapsed Round 2 reduce). All
+  three ship WASI 0.2 circuit(s) + aggregator + Soroban handler,
+  signed by an ed25519 operator quorum, settled on Stellar testnet.
+  ~600–800 LOC each end-to-end.
 - **The security stack, vendored** — `vendor/contracts/ed25519-security`
   and `vendor/contracts/ed25519-verification`, byte-identical copies of
   the audited contracts from
@@ -144,7 +146,8 @@ Project-Starter-Pack/
         ├── service/
         │   └── build-service.sh    # one workflow: cron → tick-circuit → aggregator → handler
         └── wit-definitions/        # warpdrive-vectr + aggregator worlds
-    └── 02-event-watcher/           # Stellar event watcher — same layout, set-stellar trigger
+    ├── 02-event-watcher/           # Stellar event watcher — same layout, set-stellar trigger
+    └── 03-multi-round/              # cron → Round 1 attestation → Round1Ready event → Round 2 reduce → Final
 ```
 
 Each example is self-contained: its own `Taskfile.yml`,
@@ -292,6 +295,94 @@ handler with the same salt so it lands at exactly the predicted
 address. A post-deploy assertion catches salt/source drift between
 the two steps. The pattern is reusable for any pair of contracts
 that need to know each other's addresses at construction.
+
+## What's in `examples/03-multi-round/`
+
+A cron-driven two-round composition. Every 30 s each operator's
+Round 1 circuit emits a per-Vectr value (`signer_value` = something
+that legitimately differs across operators — `wall_clock::now()
+nanoseconds % 1000` in the demo). The composer contract accumulates
+each operator's attestation into a per-`round_id` bundle until the
+bundle crosses `ceil(N · quorum_num / quorum_denom)`, at which point
+it emits a `Round1Ready` Soroban event carrying the whole bundle.
+Each operator's Round 2 circuit then observes that event, folds the
+bundle to a `min` (the simplest pure-deterministic reduce — every
+operator produces byte-identical bytes), and the host quorum-
+collapses their signatures into one envelope. `verify_xlm` dispatches
+to the Final arm, saves the aggregate, and emits `Finalized`.
+
+```
+cron tick (*/30 * * * * *)
+   │                  │
+   ▼ op 1             ▼ op 2
+┌─────────────┐    ┌─────────────┐
+│ round1-circ │    │ round1-circ │
+│ value: 421  │    │ value: 837  │   ← `signer_value` differs per op
+└──────┬──────┘    └──────┬──────┘
+       │                  │            (per-Vectr salt: payload bytes
+       │ envelope_A       │ envelope_B   themselves, distinct per op)
+       ▼                  ▼
+┌──────────────────────────────────────────────────────────────┐
+│ composer.verify_xlm(SubmissionPayload::Round1(...))          │
+│   try_check_one → push to Attestations(round_id)             │
+│   bundle.len() ≥ ceil(N·num/denom) → emit Round1Ready        │
+└────────────────────────┬─────────────────────────────────────┘
+                         │ Round1Ready event {round_id, bundle}
+                         ▼
+┌─────────────┐    ┌─────────────┐
+│ round2-circ │    │ round2-circ │
+│ aggregate:  │    │ aggregate:  │   ← every op reads SAME on-chain
+│   min=421   │    │   min=421   │     bundle → SAME bytes out
+└──────┬──────┘    └──────┬──────┘
+       │                  │            (deterministic salt: round_id
+       │   identical      │ identical    ++ "-r2", collides per op)
+       ▼                  ▼
+        host QuorumQueue collapses N envelopes into ONE with N sigs
+                         │
+                         ▼
+┌──────────────────────────────────────────────────────────────┐
+│ composer.verify_xlm(SubmissionPayload::Final(...))           │
+│   try_verify → save Final(round_id, aggregate)               │
+│   emit Finalized                                             │
+└──────────────────────────────────────────────────────────────┘
+   │
+   ▼
+anyone: final_result(round_id) → Some(min value)
+```
+
+The **salt asymmetry** is the load-bearing trick of multi-round
+WarpDrive composition:
+
+- Round 1 must use a unique-per-operator salt. If two operators
+  produce different `signer_value`s (which they SHOULD — the whole
+  point is to attest to something each Vectr observed independently),
+  but the host's QuorumQueue saw the same `event_id`, it would
+  quorum-collapse the two different envelopes into one and the
+  contract would silently reject `len(sigs) != 1` on the
+  `try_check_one` path. So Round 1 reuses the payload bytes
+  themselves as the salt — guaranteed unique because the payloads
+  legitimately differ.
+- Round 2 must use a deterministic salt. Every operator runs the
+  same pure reduce over the same on-chain bundle, so they produce
+  byte-identical envelope bytes. The host quorum-collapses their
+  signatures into ONE envelope with N signatures, which the
+  contract's `try_verify` arm accepts. Round 2's salt is
+  `round_id.to_le_bytes() ++ b"-r2"` — pure function of the trigger.
+
+The composer contract is BOTH the handler (verify_xlm with the two
+dispatch arms) AND the application state (Round1Bundle + Final live
+in its storage). No separate `stellar-handler` + `application`
+contract pair like 01/02 — one contract, no predict-then-deploy
+dance. The same pattern recurses to more rounds if you need them
+(oracle-demo's three-round flow is exactly this scaled up with a
+third `request_twap` round on top).
+
+This example REQUIRES two operators. With one operator and 1/1
+quorum, the Round 1 threshold (`ceil(1 · 1 / 1) = 1`) fires on the
+first attestation and the multi-round shape collapses to a single
+envelope per tick. Set `OPERATORS=2` in `.env` and run two
+`task run-node` terminals (one with `OP=2 task run-node`) so you
+actually see the bundle accumulate before `Round1Ready` fires.
 
 ## Where to go for more advanced patterns
 

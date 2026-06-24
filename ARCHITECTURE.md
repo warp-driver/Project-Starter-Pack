@@ -50,9 +50,11 @@ The kinds the Vectr supports today:
 `AtprotoEvent` and `BlockInterval` triggers also exist. Atproto wires
 a firehose subscription; block-interval fires every N ledgers of a
 configured chain. Neither shows up in the Starter Pack's examples —
-the three above cover almost every integration. The pack ships two
-of the three out of the box: `01-counter` (Cron) and `02-event-watcher`
-(StellarContractEvent).
+the three above cover almost every integration. The pack ships all
+three of the common triggers across its examples: `01-counter` (Cron),
+`02-event-watcher` (StellarContractEvent), and `03-multi-round`
+(Cron-into-StellarContractEvent composition, demonstrating both
+triggers in a single pipeline).
 
 Which one to use:
 
@@ -455,9 +457,10 @@ require deliberate deviation:
   carry the bundling logic: accept per-operator single-signed
   attestations, accumulate them, and run the deterministic combiner
   (median, average, majority) on-chain or in a follow-up composition
-  circuit. Oracle-demo splits this into Round 2 (single-signer, bundle
-  on chain) and Round 3 (deterministic median over the bundle,
-  full-quorum). The Starter Pack does not exercise this path.
+  circuit. The Starter Pack's `03-multi-round` is the distilled
+  reference (`SubmissionPayload::{Round1, Final}` dispatcher, bundle
+  accumulator, salt-asymmetry pattern). Oracle-demo scales this up to
+  three rounds with TWAP math; the dispatch shape is identical.
 
 ## Where this came from
 
