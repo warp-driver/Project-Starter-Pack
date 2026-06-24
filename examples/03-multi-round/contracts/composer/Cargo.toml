@@ -1,0 +1,38 @@
+[package]
+name = "composer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { version = "26", features = ["alloc"] }
+# `warpdrive-shared` is the canonical source for `XlmEnvelope`,
+# `Ed25519SignatureData`, and the verification client every handler
+# in the WarpDrive ecosystem speaks. Pinned to the same minor version
+# used by hodlers-app / oracle-demo so circuits and tooling can move
+# in lockstep without surprise XDR drift.
+warpdrive-shared = "0.2.4"
+
+[dev-dependencies]
+soroban-sdk = { version = "26", features = ["testutils"] }
+warpdrive-shared = { version = "0.2.4", features = ["testutils"] }
+# Real security + verification contracts in tests — the composer's
+# happy paths deploy the full on-chain pipeline (security ←
+# verification ← composer) and exercise real signed envelopes. Mocking
+# the verification layer would let bugs in the envelope encoding hide,
+# which is the most fragile boundary between off-chain circuit and
+# on-chain handler.
+ed25519-verification = { path = "../ed25519-verification" }
+ed25519-security = { path = "../ed25519-security" }
+
+[profile.release]
+overflow-checks = true
+strip = "symbols"
+debug = 0
+panic = "abort"
+codegen-units = 1
+lto = true
