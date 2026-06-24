@@ -1,0 +1,21 @@
+[package]
+name = "message-board"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# `cdylib` for the deployable wasm; `lib` so the stellar-handler crate
+# can import `MessageBoardClient` (typed cross-contract calls) at
+# build time. Same pattern as 01-counter/counter and hodlers/Cargo.toml.
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { version = "26", features = ["alloc"] }
+
+[dev-dependencies]
+soroban-sdk = { version = "26", features = ["testutils"] }
+
+[profile.release]
+overflow-checks = true
