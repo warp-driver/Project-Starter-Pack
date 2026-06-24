@@ -1,0 +1,9 @@
+target/
+out/
+*.swp
+node_modules/
+dist/
+.env
+wit-definitions/wit/deps/
+.spec/
+local/
