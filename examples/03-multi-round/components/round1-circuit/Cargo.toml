@@ -1,0 +1,32 @@
+[package]
+name = "round1-circuit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# anyhow         — ergonomic error context inside `run_inner`; the WIT export
+#                  signature returns `Result<_, String>` so we flatten with
+#                  `e.to_string()` at the boundary.
+# stellar-xdr    — hand-build the `SubmissionPayload::Round1(Round1Payload)`
+#                  XDR the composer's `verify_xlm` decodes via
+#                  `SubmissionPayload::from_xdr`. Same version + feature set
+#                  used across 01-counter / 02-event-watcher / oracle-demo
+#                  so the wire bytes match the rest of the fleet.
+# wit-bindgen    — generates the `circuit-world` glue from
+#                  `../../wit-definitions/wit`.
+anyhow = "1.0"
+stellar-xdr = { version = "26.0.0", features = ["serde", "serde_json", "base64"] }
+wit-bindgen = "0.53.1"
+
+[package.metadata.component]
+package = "starter-pack:round1-circuit"
+
+[profile.release]
+# `opt-level = "s"` + LTO trims ~20% off the wasm; warpdrive enforces a
+# per-component fuel budget so smaller modules also start faster.
+opt-level = "s"
+lto = true
