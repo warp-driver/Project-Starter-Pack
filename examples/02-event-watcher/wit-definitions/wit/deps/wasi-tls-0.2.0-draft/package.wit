@@ -1,0 +1,22 @@
+package wasi:tls@0.2.0-draft;
+
+interface types {
+  use wasi:io/streams@0.2.0.{input-stream, output-stream};
+  use wasi:io/poll@0.2.0.{pollable};
+  use wasi:io/error@0.2.0.{error as io-error};
+
+  resource client-handshake {
+    constructor(server-name: string, input: input-stream, output: output-stream);
+    finish: static func(this: client-handshake) -> future-client-streams;
+  }
+
+  resource client-connection {
+    close-output: func();
+  }
+
+  resource future-client-streams {
+    subscribe: func() -> pollable;
+    get: func() -> option<result<result<tuple<client-connection, input-stream, output-stream>, io-error>>>;
+  }
+}
+

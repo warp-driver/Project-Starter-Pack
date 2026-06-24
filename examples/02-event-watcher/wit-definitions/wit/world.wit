@@ -1,0 +1,18 @@
+// 02-event-watcher component worlds. The event-watcher-circuit and the
+// matching Stellar-submit aggregator share the same WIT package; the
+// worlds differ only by which Warp Drive world they include.
+//
+// `cargo component build` reads this file (via each crate's
+// `[package.metadata.component.target] path = "../../wit-definitions/wit"`)
+// and resolves the `warpdrive:vectr` / `warpdrive:aggregator` packages
+// from wit-definitions/wit/deps/ (populated by `task fetch-wit`).
+
+package event-watcher:components;
+
+world circuit-world {
+    include warpdrive:vectr/warpdrive-world@2.12.0;
+}
+
+world aggregator-world {
+    include warpdrive:aggregator/aggregator-world@2.12.0;
+}
