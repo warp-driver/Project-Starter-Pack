@@ -1,0 +1,41 @@
+[package]
+name = "round2-circuit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# anyhow         — ergonomic error context inside `run_inner`; the WIT export
+#                  signature returns `Result<_, String>` so we flatten with
+#                  `e.to_string()` at the boundary.
+# base64         — Soroban event topic_segments + value arrive as
+#                  standard-base64 ScVal envelopes; decode with the same
+#                  engine 02-event-watcher / hodlers-app use so binary
+#                  identity holds.
+# serde_json     — the warpdrive poller sometimes pre-decodes the ScVal to
+#                  its serde JSON form; the parse_scval helper tries JSON
+#                  first, then falls back to XDR base64.
+# stellar-xdr    — hand-build the `SubmissionPayload::Final(FinalPayload)`
+#                  XDR the composer's `verify_xlm` decodes, and parse the
+#                  incoming Round1Bundle map. Same version + feature set as
+#                  round1-circuit / 02-event-watcher / oracle-demo so the
+#                  wire bytes match across the fleet.
+# wit-bindgen    — generates the `circuit-world` glue from
+#                  `../../wit-definitions/wit`.
+anyhow = "1.0"
+base64 = "0.22"
+serde_json = "1.0"
+stellar-xdr = { version = "26.0.0", features = ["serde", "serde_json", "base64"] }
+wit-bindgen = "0.53.1"
+
+[package.metadata.component]
+package = "starter-pack:round2-circuit"
+
+[profile.release]
+# `opt-level = "s"` + LTO trims ~20% off the wasm; warpdrive enforces a
+# per-component fuel budget so smaller modules also start faster.
+opt-level = "s"
+lto = true
