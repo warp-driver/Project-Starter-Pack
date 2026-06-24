@@ -1,0 +1,69 @@
+# Template Warpdrive node config — copied into each example's tree by
+# scripts/new-project.sh (or by hand). Per-example overrides live in the
+# example's copy, NOT here; keep this file as the lowest-common-denominator.
+#
+# Single-operator dev setup by default: dev_endpoints_enabled = true so
+# `task wire-service` can POST service.json to /dev/services, and a local
+# (mDNS) P2P block so a single node runs standalone. For multi-operator
+# deploys see the [warpdrive.p2p.remote] template at the bottom.
+
+[default]
+log_level = ["info", "warpdrive=debug"]
+
+[default.chains.stellar.testnet]
+chain_poll_interval_ms = 5000
+rpc_url = "https://soroban-testnet.stellar.org"
+network_passphrase = "Test SDF Network ; September 2015"
+friendbot_url = "https://friendbot-testnet.stellar.org/"
+
+# Add per-chain blocks here if your circuit needs EVM/Cosmos triggers.
+# See oracle-demo/warpdrive.toml for a Sepolia example: chain_id +
+# ws_endpoints + http_endpoint under [default.chains.evm.<name>] and a
+# matching [cli.chains.evm.<name>] below.
+
+[warpdrive]
+port = 8000
+dev_endpoints_enabled = true
+ipfs_gateway = "https://gateway.pinata.cloud/ipfs/"
+
+# Single-op default. To run an N-operator quorum, replace this block with
+# the [warpdrive.p2p.remote] template at the bottom and set
+# bootstrap_nodes appropriately on each non-bootstrap node.
+[warpdrive.p2p.local]
+listen_port = 9000
+
+[cli]
+
+[cli.chains.stellar.testnet]
+chain_poll_interval_ms = 5000
+rpc_url = "https://soroban-testnet.stellar.org"
+network_passphrase = "Test SDF Network ; September 2015"
+friendbot_url = "https://friendbot-testnet.stellar.org/"
+
+# Mirror any [default.chains.*] block you add above with a [cli.chains.*]
+# entry so the CLI talks to the same network the node does.
+
+# ── Multi-operator template ─────────────────────────────────────────────
+#
+# Replace [warpdrive.p2p.local] above with one of these:
+#
+# Bootstrap node (operator-1):
+# [warpdrive.p2p.remote]
+# listen_port = 9000
+# bootstrap_nodes = []
+#
+# Follower nodes (operator-2 / operator-3 / ...):
+# [warpdrive.p2p.remote]
+# listen_port = 9000
+# bootstrap_nodes = [
+#     "/ip4/<operator-1-ip>/tcp/9000/p2p/<operator-1-peer-id>",
+# ]
+#
+# The peer_id is deterministic from WARPDRIVE_SIGNING_MNEMONIC at HD path
+# m/44'/60'/0'/0/0 — read it from the first run's log line
+# "Using P2P identity derived from signing_mnemonic (peer_id: 12D3KooW...)".
+#
+# Chain entries ([default.chains.*] / [cli.chains.*]) are operator-agnostic
+# — every operator points at the same RPC endpoints. Only the
+# [warpdrive.p2p.remote] block (listen_port / bootstrap_nodes) varies
+# per operator.
