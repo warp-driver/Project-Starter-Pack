@@ -72,6 +72,15 @@ cp rust-toolchain.toml "$DEST/rust-toolchain.toml"
 echo "+ copying warpdrive.toml.template -> warpdrive.toml"
 cp warpdrive.toml.template "$DEST/warpdrive.toml"
 
+# Retarget the Taskfile's SCRIPTS path from in-pack (`../../scripts`) to
+# the forked layout (`./scripts`). The example's Taskfile ships with the
+# in-pack default so it works when run from `examples/01-counter/` inside
+# the Starter Pack itself; after scaffolding the scripts dir lives at the
+# project root, so we flip the default here.
+if [ -f "$DEST/Taskfile.yml" ]; then
+    echo "+ retargeting SCRIPTS path in Taskfile.yml"
+    sed -i 's@\.SCRIPTS | default "../../scripts"@.SCRIPTS | default "./scripts"@g' "$DEST/Taskfile.yml"
+fi
 echo "+ initialising git repo in $DEST"
 (
     cd "$DEST"
