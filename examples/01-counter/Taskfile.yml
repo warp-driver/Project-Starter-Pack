@@ -114,42 +114,68 @@ tasks:
 
   deploy-counter:
     desc: |
-      Deploy the counter contract using DEPLOYER_SECRET. Writes
-      out/counter.json. The counter learns the handler address at
-      register-handler time (counter.tick `require_auth`s that handler),
-      so this step is decoupled from out/handler.json.
+      Deploy the counter contract using DEPLOYER_SECRET. Counter's
+      __constructor takes the handler address — but the handler's
+      constructor takes the counter address, so it's a cyclic
+      dependency. We resolve it by predicting the handler address
+      from `stellar contract id wasm --salt $HANDLER_SALT
+      --source-account $DEPLOYER_ADDRESS` (Soroban addresses are
+      deterministic in source + salt), passing that predicted address
+      into counter's constructor, then deploying the handler with the
+      same salt in deploy-handler so it lands at exactly the
+      predicted address. Same idiom as 02-event-watcher.
     deps: [build-counter]
     cmds:
       - mkdir -p out
       - |
         set -euo pipefail
         : "${DEPLOYER_SECRET:?DEPLOYER_SECRET is required}"
+        : "${DEPLOYER_ADDRESS:?DEPLOYER_ADDRESS is required (seeds handler-address prediction)}"
+        HANDLER_SALT=$(printf '%s:counter-handler-v1' "$DEPLOYER_ADDRESS" | sha256sum | head -c 64)
+        HANDLER_PREDICTED=$(stellar contract id wasm \
+            --salt "$HANDLER_SALT" \
+            --source-account "$DEPLOYER_ADDRESS" \
+            --rpc-url "{{.RPC_URL}}" --network-passphrase "{{.NETWORK_PASSPHRASE}}")
         COUNTER_ADDR=$(stellar contract deploy --wasm {{.COUNTER_WASM}} \
             --rpc-url "{{.RPC_URL}}" --network-passphrase "{{.NETWORK_PASSPHRASE}}" \
-            --source "$DEPLOYER_SECRET")
-        echo "{\"counter\":\"$COUNTER_ADDR\"}" | jq . > out/counter.json
+            --source "$DEPLOYER_SECRET" \
+            -- --handler "$HANDLER_PREDICTED")
+        echo "{\"counter\":\"$COUNTER_ADDR\",\"predicted_handler\":\"$HANDLER_PREDICTED\"}" \
+            | jq . > out/counter.json
         cat out/counter.json
 
   deploy-handler:
     desc: |
-      Deploy stellar-handler using DEPLOYER_SECRET. Reads the verification
-      contract from out/deploy.json and the counter contract from
-      out/counter.json; both addresses go into instance storage at
-      construction. Writes out/handler.json.
+      Deploy stellar-handler using DEPLOYER_SECRET at the deterministic
+      address counter's constructor was already told to trust. Re-derives
+      the same salt deploy-counter used (same formula, same
+      DEPLOYER_ADDRESS), passes it to `stellar contract deploy --salt`,
+      then sanity-checks the actual deployed address matches the
+      predicted_handler field — a mismatch means the salt/source
+      environment drifted between the two steps and the on-chain wiring
+      is broken. Reads the verification contract from out/deploy.json
+      and the counter from out/counter.json. Writes out/handler.json.
     deps: [build-handler]
     cmds:
       - mkdir -p out
       - |
         set -euo pipefail
         : "${DEPLOYER_SECRET:?DEPLOYER_SECRET is required}"
+        : "${DEPLOYER_ADDRESS:?DEPLOYER_ADDRESS is required (re-derives handler salt)}"
         VERIFICATION=$(jq -er .contracts.ed25519_verification out/deploy.json) \
             || { echo "out/deploy.json missing .contracts.ed25519_verification — run task deploy-middleware first"; exit 1; }
         COUNTER=$(jq -er .counter out/counter.json) \
             || { echo "out/counter.json missing .counter — run task deploy-counter first"; exit 1; }
+        PREDICTED=$(jq -er .predicted_handler out/counter.json) \
+            || { echo "out/counter.json missing .predicted_handler — re-run task deploy-counter"; exit 1; }
+        HANDLER_SALT=$(printf '%s:counter-handler-v1' "$DEPLOYER_ADDRESS" | sha256sum | head -c 64)
         HANDLER_ADDR=$(stellar contract deploy --wasm {{.HANDLER_WASM}} \
+            --salt "$HANDLER_SALT" \
             --rpc-url "{{.RPC_URL}}" --network-passphrase "{{.NETWORK_PASSPHRASE}}" \
             --source "$DEPLOYER_SECRET" \
             -- --verification_contract "$VERIFICATION" --counter_contract "$COUNTER")
+        test "$HANDLER_ADDR" = "$PREDICTED" \
+            || { echo "handler addr mismatch: predicted=$PREDICTED actual=$HANDLER_ADDR (salt/source drift between deploy-counter and deploy-handler)"; exit 1; }
         echo "{\"handler\":\"$HANDLER_ADDR\"}" | jq . > out/handler.json
         cat out/handler.json
 
