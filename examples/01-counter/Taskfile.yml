@@ -1,0 +1,449 @@
+version: '3'
+
+# Environment variables (export via shell or .env — e.g. by running
+# `../../scripts/bootstrap-keys.sh > .env`):
+#
+#   DEPLOYER_SECRET / DEPLOYER_ADDRESS  Funded testnet S-seed + G-address.
+#                                       `--source` for every deploy/invoke
+#                                       and BYOK secret for middleware.
+#   WARPDRIVE_SIGNING_MNEMONIC[_N]      BIP39 mnemonic the node HD-derives
+#                                       its ed25519 signing key from. Plain
+#                                       form for OP=1; suffixed for OP>1.
+#                                       Raw-hex secrets won't HD-derive.
+#   RPC_URL / NETWORK_PASSPHRASE        Stellar RPC + passphrase (default testnet).
+#   TRIGGER_CHAIN / MANAGER_CHAIN       Submit-on / manager chain keys
+#                                       (default stellar:testnet).
+#   CRON_SCHEDULE                       Tick cron (default every 30 s).
+#   SIGNER_WEIGHT                       Per-op weight on security (default 100).
+#   THRESHOLD_NUM / THRESHOLD_DEN       Threshold fraction (default 1/1).
+#                                       Multi-op needs N/N with N == OPERATORS.
+#   OPERATORS                           Operator count (default 1; set 2 for
+#                                       the multi-host pattern — see run-node).
+#   MIDDLEWARE_IMAGE                    warpdrive-stellar-middleware tag.
+#   SCRIPTS                             Path to pack scripts/ (default
+#                                       ../../scripts; `scripts` after fork).
+#
+# Artefacts (./out/, gitignored): deploy.json, counter.json, handler.json,
+# tick-circuit.digest, aggregator.digest, service.hash, signer-op${N}.{json,pubkey},
+# node-data{,-N}/ (per-op state), op${N}-home/ (per-op WARPDRIVE_HOME, OP>1).
+
+vars:
+  RPC_URL: '{{.RPC_URL | default "https://soroban-testnet.stellar.org"}}'
+  NETWORK_PASSPHRASE: '{{.NETWORK_PASSPHRASE | default "Test SDF Network ; September 2015"}}'
+  TRIGGER_CHAIN: '{{.TRIGGER_CHAIN | default "stellar:testnet"}}'
+  MANAGER_CHAIN: '{{.MANAGER_CHAIN | default "stellar:testnet"}}'
+  SIGNER_WEIGHT: '{{.SIGNER_WEIGHT | default "100"}}'
+  THRESHOLD_NUM: '{{.THRESHOLD_NUM | default "1"}}'
+  THRESHOLD_DEN: '{{.THRESHOLD_DEN | default "1"}}'
+  MIDDLEWARE_IMAGE: '{{.MIDDLEWARE_IMAGE | default "ghcr.io/warp-driver/warpdrive-stellar-middleware:latest"}}'
+  COUNTER_WASM: contracts/counter/target/wasm32v1-none/release/counter.wasm
+  HANDLER_WASM: contracts/stellar-handler/target/wasm32v1-none/release/stellar_handler.wasm
+  TICK_WASM: components/tick-circuit/target/wasm32-wasip1/release/tick_circuit.wasm
+  AGGREGATOR_WASM: components/aggregator/target/wasm32-wasip1/release/counter_aggregator.wasm
+  SERVICE_FILE: '{{.SERVICE_FILE | default "service/service.json"}}'
+  # Cron expression for the tick workflow. Every 30 s by default for
+  # demo responsiveness; relax for less testnet noise. Baked into
+  # service.json by build-service.
+  CRON_SCHEDULE: '{{.CRON_SCHEDULE | default "*/30 * * * * *"}}'
+  # Tasks tagged OP-aware read the OP env var (default 1) to pick which
+  # operator node they target. register-signers + wire-service walk
+  # OP=1..{{.OPERATORS}} themselves.
+  OPERATORS: '{{.OPERATORS | default "1"}}'
+  # In-pack default. Override with `SCRIPTS=scripts task ...` after a
+  # new-project.sh fork (which copies scripts/ to the project root).
+  SCRIPTS: '{{.SCRIPTS | default "../../scripts"}}'
+
+tasks:
+  fetch-wit:
+    desc: Fetch warpdrive WIT dependencies into wit-definitions/wit/deps/.
+    cmds:
+      - cd wit-definitions && wkg wit fetch
+
+  # ── contract builds ───────────────────────────────────────────────────
+
+  build-counter:
+    desc: Build counter Soroban contract.
+    cmds:
+      - cd contracts/counter && stellar contract build --optimize
+
+  build-handler:
+    desc: Build stellar-handler Soroban contract.
+    cmds:
+      - cd contracts/stellar-handler && stellar contract build --optimize
+
+  build-security:
+    desc: Build ed25519-security Soroban contract (vendored from warpdrive-contracts).
+    cmds:
+      - cd contracts/ed25519-security && stellar contract build --optimize
+
+  build-verification:
+    desc: Build ed25519-verification Soroban contract (vendored from warpdrive-contracts).
+    cmds:
+      - cd contracts/ed25519-verification && stellar contract build --optimize
+
+  build-contracts:
+    desc: Build all four Soroban contracts (security + verification + counter + handler).
+    deps: [build-security, build-verification, build-counter, build-handler]
+
+  # ── component builds ──────────────────────────────────────────────────
+
+  build-tick-circuit:
+    desc: Build tick-circuit (cron → TickPayload { ts }) as a WASI 0.2 component.
+    cmds:
+      - cargo component build --release --manifest-path components/tick-circuit/Cargo.toml
+
+  build-aggregator:
+    desc: Build counter-aggregator (emits one Stellar SubmitAction per tick) as a WASI 0.2 component.
+    cmds:
+      - cargo component build --release --manifest-path components/aggregator/Cargo.toml
+
+  build-components:
+    desc: Build both WASI components (tick-circuit + aggregator).
+    deps: [build-tick-circuit, build-aggregator]
+
+  # ── on-chain deploys ──────────────────────────────────────────────────
+
+  deploy-middleware:
+    desc: |
+      Deploy ed25519 pipeline + project-root via warpdrive-stellar-middleware
+      using your DEPLOYER_SECRET (BYOK). Writes out/deploy.json with
+      ed25519_security, ed25519_verification, project_root addresses.
+    cmds:
+      - mkdir -p out
+      - '{{.SCRIPTS}}/middleware.sh deploy --output-path /out/deploy.json --variant stellar'
+
+  deploy-counter:
+    desc: |
+      Deploy the counter contract using DEPLOYER_SECRET. Writes
+      out/counter.json. The counter learns the handler address at
+      register-handler time (counter.tick `require_auth`s that handler),
+      so this step is decoupled from out/handler.json.
+    deps: [build-counter]
+    cmds:
+      - mkdir -p out
+      - |
+        set -euo pipefail
+        : "${DEPLOYER_SECRET:?DEPLOYER_SECRET is required}"
+        COUNTER_ADDR=$(stellar contract deploy --wasm {{.COUNTER_WASM}} \
+            --rpc-url "{{.RPC_URL}}" --network-passphrase "{{.NETWORK_PASSPHRASE}}" \
+            --source "$DEPLOYER_SECRET")
+        echo "{\"counter\":\"$COUNTER_ADDR\"}" | jq . > out/counter.json
+        cat out/counter.json
+
+  deploy-handler:
+    desc: |
+      Deploy stellar-handler using DEPLOYER_SECRET. Reads the verification
+      contract from out/deploy.json and the counter contract from
+      out/counter.json; both addresses go into instance storage at
+      construction. Writes out/handler.json.
+    deps: [build-handler]
+    cmds:
+      - mkdir -p out
+      - |
+        set -euo pipefail
+        : "${DEPLOYER_SECRET:?DEPLOYER_SECRET is required}"
+        VERIFICATION=$(jq -er .contracts.ed25519_verification out/deploy.json) \
+            || { echo "out/deploy.json missing .contracts.ed25519_verification — run task deploy-middleware first"; exit 1; }
+        COUNTER=$(jq -er .counter out/counter.json) \
+            || { echo "out/counter.json missing .counter — run task deploy-counter first"; exit 1; }
+        HANDLER_ADDR=$(stellar contract deploy --wasm {{.HANDLER_WASM}} \
+            --rpc-url "{{.RPC_URL}}" --network-passphrase "{{.NETWORK_PASSPHRASE}}" \
+            --source "$DEPLOYER_SECRET" \
+            -- --verification_contract "$VERIFICATION" --counter_contract "$COUNTER")
+        echo "{\"handler\":\"$HANDLER_ADDR\"}" | jq . > out/handler.json
+        cat out/handler.json
+
+  register-handler:
+    desc: |
+      Register stellar-handler on project_root so its submissions are
+      tracked. Admin-only — must use DEPLOYER_SECRET (project_root's
+      admin until handoff). Required before verify_xlm can call
+      ed25519-verification.try_verify.
+    cmds:
+      - |
+        set -euo pipefail
+        : "${DEPLOYER_SECRET:?DEPLOYER_SECRET is required}"
+        PROJECT_ROOT=$(jq -er .contracts.project_root out/deploy.json) \
+            || { echo "out/deploy.json missing .contracts.project_root"; exit 1; }
+        HANDLER=$(jq -er .handler out/handler.json) \
+            || { echo "out/handler.json missing .handler — run task deploy-handler first"; exit 1; }
+        stellar contract invoke --id "$PROJECT_ROOT" \
+            --rpc-url "{{.RPC_URL}}" --network-passphrase "{{.NETWORK_PASSPHRASE}}" \
+            --source "$DEPLOYER_SECRET" \
+            -- register_handler --handler "$HANDLER"
+        echo "registered handler $HANDLER on project_root $PROJECT_ROOT"
+
+  # ── component uploads (OP-aware) ──────────────────────────────────────
+
+  upload-tick-circuit:
+    desc: Upload tick-circuit wasm to operator OP's node (default 1); writes digest to out/tick-circuit.digest.
+    deps: [build-tick-circuit]
+    cmds:
+      - mkdir -p out
+      - |
+        . {{.SCRIPTS}}/op-env.sh
+        {{.SCRIPTS}}/upload-component.sh "$OP_URL" {{.TICK_WASM}} > out/tick-circuit.digest
+        echo "op ${OP_INDEX} tick-circuit digest: $(cat out/tick-circuit.digest)"
+
+  upload-aggregator:
+    desc: Upload counter-aggregator wasm to operator OP's node (default 1); writes digest to out/aggregator.digest.
+    deps: [build-aggregator]
+    cmds:
+      - mkdir -p out
+      - |
+        . {{.SCRIPTS}}/op-env.sh
+        {{.SCRIPTS}}/upload-component.sh "$OP_URL" {{.AGGREGATOR_WASM}} > out/aggregator.digest
+        echo "op ${OP_INDEX} aggregator digest: $(cat out/aggregator.digest)"
+
+  # ── service.json + node registration ──────────────────────────────────
+
+  build-service:
+    desc: |
+      Assemble service.json declaratively via service/build-service.sh.
+      Requires out/handler.json plus uploaded component digests at
+      out/tick-circuit.digest + out/aggregator.digest.
+    cmds:
+      - mkdir -p service
+      - rm -f {{.SERVICE_FILE}}
+      - >-
+        SERVICE_FILE={{.SERVICE_FILE}}
+        TRIGGER_CHAIN={{.TRIGGER_CHAIN}}
+        MANAGER_CHAIN={{.MANAGER_CHAIN}}
+        CRON_SCHEDULE='{{.CRON_SCHEDULE}}'
+        ./service/build-service.sh
+
+  register-service:
+    desc: |
+      Register service/service.json with operator OP's warpdrive node
+      via /dev/services. Saves the hash to out/service.hash and
+      activates the service. The hash is content-addressed, so it's
+      identical across operators. Idempotent — a pre-existing
+      registration under the same project_root manager is dropped via
+      DELETE /services and re-activated.
+    cmds:
+      - mkdir -p out
+      - |
+        set -euo pipefail
+        . {{.SCRIPTS}}/op-env.sh
+        HASH=$(curl -sS -X POST "$OP_URL/dev/services" \
+            -H "Content-Type: application/json" \
+            --data @{{.SERVICE_FILE}} | jq -r .hash)
+        test -n "$HASH" && test "$HASH" != "null" \
+            || { echo "no hash returned from $OP_URL/dev/services"; exit 1; }
+        echo "$HASH" > out/service.hash
+        echo "service hash (op ${OP_INDEX}): $HASH"
+
+        activate() {
+            curl -sS -o /tmp/counter-activate.body -w '%{http_code}' \
+                -X POST "$OP_URL/dev/services/$HASH"
+        }
+        STATUS=$(activate)
+        if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ]; then
+            echo "service registered with op ${OP_INDEX} dispatcher"
+            exit 0
+        fi
+        BODY=$(cat /tmp/counter-activate.body 2>/dev/null || true)
+        case "$BODY" in
+            *"already registered"*)
+                echo "op ${OP_INDEX}: service manager already registered — deleting old registration"
+                MANAGER=$(jq -c '.manager' {{.SERVICE_FILE}})
+                jq -nc --argjson m "$MANAGER" '{service_managers: [$m]}' \
+                    | curl -sSf -X DELETE "$OP_URL/services" \
+                        -H "Content-Type: application/json" \
+                        --data-binary @-
+                STATUS=$(activate)
+                test "$STATUS" = "200" -o "$STATUS" = "204" \
+                    || { echo "re-activation failed: HTTP $STATUS"; cat /tmp/counter-activate.body; exit 1; }
+                echo "service re-registered with op ${OP_INDEX} dispatcher"
+                ;;
+            *)
+                echo "activation failed: HTTP $STATUS"
+                echo "$BODY"
+                exit 1
+                ;;
+        esac
+
+  fetch-signer:
+    desc: |
+      Ask operator OP's warpdrive node for its ed25519 pubkey for the
+      currently registered service. Writes SignerResponse to
+      out/signer-op${OP}.json and the pubkey to out/signer-op${OP}.pubkey.
+    cmds:
+      - mkdir -p out
+      - |
+        set -euo pipefail
+        . {{.SCRIPTS}}/op-env.sh
+        PROJECT_ROOT=$(jq -r .contracts.project_root out/deploy.json)
+        BODY=$(jq -nc --arg chain "{{.MANAGER_CHAIN}}" --arg addr "$PROJECT_ROOT" \
+            '{service_manager: {stellar: {chain: $chain, address: $addr}}}')
+        curl -sSf -X POST "$OP_URL/services/signer" \
+            -H "Content-Type: application/json" \
+            --data "$BODY" > "out/signer-op${OP_INDEX}.json"
+        jq -r .ed25519.ed25519_pubkey "out/signer-op${OP_INDEX}.json" > "out/signer-op${OP_INDEX}.pubkey"
+        test -s "out/signer-op${OP_INDEX}.pubkey" \
+            || { echo "no pubkey in signer response"; cat "out/signer-op${OP_INDEX}.json"; exit 1; }
+        echo "op ${OP_INDEX} pubkey: $(cat out/signer-op${OP_INDEX}.pubkey)"
+
+  set-threshold:
+    desc: |
+      Update the consensus threshold on the ed25519-security contract
+      (default {{.THRESHOLD_NUM}}/{{.THRESHOLD_DEN}}; override via env
+      vars). Routed through project_root, the security contract's admin
+      after deploy-middleware.
+    cmds:
+      - |
+        {{.SCRIPTS}}/middleware.sh set-threshold \
+            --scheme ed25519 \
+            --numerator {{.THRESHOLD_NUM}} --denominator {{.THRESHOLD_DEN}} \
+            --deploy-file /out/deploy.json --via-project-root
+
+  register-signer:
+    desc: |
+      Single-op convenience: fetch this operator's pubkey (auto-runs
+      fetch-signer when out/signer-op1.pubkey is missing), register it
+      on ed25519-security at SIGNER_WEIGHT, then apply
+      THRESHOLD_NUM/THRESHOLD_DEN (default 1/1 = "any signer
+      suffices"). For multi-op use `task register-signers`.
+    cmds:
+      - test -s out/signer-op1.pubkey || task fetch-signer
+      - |
+        set -euo pipefail
+        : "${DEPLOYER_SECRET:?DEPLOYER_SECRET is required}"
+        SIGNER_PUBKEY=$(cat out/signer-op1.pubkey)
+        {{.SCRIPTS}}/middleware.sh add-signer \
+            --scheme ed25519 --key "$SIGNER_PUBKEY" --weight {{.SIGNER_WEIGHT}} \
+            --deploy-file /out/deploy.json --via-project-root
+        {{.SCRIPTS}}/middleware.sh set-threshold \
+            --scheme ed25519 \
+            --numerator {{.THRESHOLD_NUM}} --denominator {{.THRESHOLD_DEN}} \
+            --deploy-file /out/deploy.json --via-project-root
+
+  register-signers:
+    desc: |
+      Multi-op signer sync: rewrites the ed25519-security signer set to
+      exactly the {{.OPERATORS}} running operators' ed25519 pubkeys, then
+      applies THRESHOLD_NUM/THRESHOLD_DEN. Walks OP=1..{{.OPERATORS}},
+      drops any stale on-chain signer, adds any missing one at
+      SIGNER_WEIGHT. Idempotent — safe to re-run after any
+      mnemonic rotation.
+    cmds:
+      - |
+        set -euo pipefail
+        : "${DEPLOYER_SECRET:?DEPLOYER_SECRET is required}"
+        SECURITY=$(jq -r .contracts.ed25519_security out/deploy.json)
+
+        # 1. Fetch each running node's current pubkey.
+        DESIRED=""
+        for i in $(seq 1 {{.OPERATORS}}); do
+            OP=$i task fetch-signer
+            P=$(cat "out/signer-op${i}.pubkey")
+            DESIRED="${DESIRED}${P}\n"
+        done
+        DESIRED=$(printf "$DESIRED" | sort -u)
+        echo "desired signer set:"
+        echo "$DESIRED" | sed 's/^/  /'
+
+        # 2. Drop any on-chain signer that isn't desired.
+        CURRENT=$(stellar contract invoke --id "$SECURITY" \
+                --rpc-url "{{.RPC_URL}}" --network-passphrase "{{.NETWORK_PASSPHRASE}}" \
+                --source "$DEPLOYER_SECRET" -- list_signers \
+            | jq -r '.[].key' | sort -u)
+        for STALE in $(comm -23 <(echo "$CURRENT") <(echo "$DESIRED")); do
+            test -z "$STALE" && continue
+            echo "removing stale signer $STALE"
+            {{.SCRIPTS}}/middleware.sh remove-signer \
+                --scheme ed25519 --key "$STALE" \
+                --deploy-file /out/deploy.json --via-project-root
+        done
+
+        # 3. Add any missing desired signer at SIGNER_WEIGHT.
+        for NEW in $(comm -23 <(echo "$DESIRED") <(echo "$CURRENT")); do
+            test -z "$NEW" && continue
+            echo "adding signer $NEW (weight {{.SIGNER_WEIGHT}})"
+            {{.SCRIPTS}}/middleware.sh add-signer \
+                --scheme ed25519 --key "$NEW" --weight {{.SIGNER_WEIGHT}} \
+                --deploy-file /out/deploy.json --via-project-root
+        done
+
+        # 4. Apply threshold.
+        {{.SCRIPTS}}/middleware.sh set-threshold \
+            --scheme ed25519 \
+            --numerator {{.THRESHOLD_NUM}} --denominator {{.THRESHOLD_DEN}} \
+            --deploy-file /out/deploy.json --via-project-root
+        echo "security set synced — {{.OPERATORS}} signer(s), threshold {{.THRESHOLD_NUM}}/{{.THRESHOLD_DEN}}"
+
+  run-node:
+    desc: |
+      Run operator OP's warpdrive node. Default OP=1 binds :8000 (HTTP)
+      and :9000 (libp2p) under out/node-data. Multi-op quickstart leaves
+      OP unset in terminal A and runs `OP=2 task run-node` in terminal B.
+      Each op HD-derives from WARPDRIVE_SIGNING_MNEMONIC (OP=1) or
+      WARPDRIVE_SIGNING_MNEMONIC_N (OP>1); DEPLOYER_SECRET doubles as the
+      Stellar aggregator credential. For OP>1 a per-op warpdrive.toml is
+      materialised under out/op${OP}-home/ with `port = 8000` and
+      `listen_port = 9000` rewritten by 10*(OP-1) — keep those literal
+      lines unchanged in warpdrive.toml so the sed anchors hold.
+    cmds:
+      - |
+        set -euo pipefail
+        : "${DEPLOYER_SECRET:?DEPLOYER_SECRET is required (used as WARPDRIVE_AGGREGATOR_STELLAR_CREDENTIAL)}"
+        . {{.SCRIPTS}}/op-env.sh
+        test -n "$OP_MNEMONIC" \
+            || { echo "$OP_MNEMONIC_VAR is empty — re-run {{.SCRIPTS}}/bootstrap-keys.sh with OPERATORS=${OP_INDEX}"; exit 1; }
+        mkdir -p "$OP_DATA"
+
+        # OP=1 reuses the example's warpdrive.toml in $PWD. OP>1 gets a
+        # copy under out/op${OP}-home with the listening ports rewritten
+        # so two nodes can coexist on one host.
+        if [ "$OP_INDEX" = "1" ]; then
+            OP_HOME="$PWD"
+        else
+            OP_HOME="$PWD/out/op${OP_INDEX}-home"
+            mkdir -p "$OP_HOME"
+            sed -e "s/^port = 8000$/port = ${OP_PORT}/" \
+                -e "s/^listen_port = 9000$/listen_port = ${OP_P2P_PORT}/" \
+                warpdrive.toml > "$OP_HOME/warpdrive.toml"
+        fi
+
+        echo "starting op ${OP_INDEX} on http=:${OP_PORT} p2p=:${OP_P2P_PORT} home=$OP_HOME data=$OP_DATA"
+        WARPDRIVE_HOME="$OP_HOME" \
+        WARPDRIVE_DATA="$PWD/$OP_DATA" \
+        WARPDRIVE_SIGNING_MNEMONIC="$OP_MNEMONIC" \
+        WARPDRIVE_AGGREGATOR_STELLAR_CREDENTIAL="${WARPDRIVE_AGGREGATOR_STELLAR_CREDENTIAL:-$DEPLOYER_SECRET}" \
+        warpdrive
+
+  deploy:
+    desc: |
+      Phase 1 (no node required): build contracts + components, deploy
+      the ed25519 stack + project_root, deploy counter + handler,
+      register the handler with project_root. After this, start
+      `task run-node` (one terminal per operator), then `task wire-service`.
+    cmds:
+      - task: build-contracts
+      - task: build-components
+      - task: deploy-middleware
+      - task: deploy-counter
+      - task: deploy-handler
+      - task: register-handler
+
+  wire-service:
+    desc: |
+      Phase 2 (every `task run-node` already running): walks
+      OP=1..{{.OPERATORS}} uploading both component wasms to each node,
+      assembles service/service.json, then activates it on every
+      operator's dispatcher. After this, `task register-signer` (single
+      op) or `task register-signers` (multi-op walker).
+    cmds:
+      - |
+        set -euo pipefail
+        for i in $(seq 1 {{.OPERATORS}}); do
+            echo "── wiring op $i ──"
+            OP=$i task upload-tick-circuit
+            OP=$i task upload-aggregator
+        done
+      - task: build-service
+      - |
+        set -euo pipefail
+        for i in $(seq 1 {{.OPERATORS}}); do
+            OP=$i task register-service
+        done
