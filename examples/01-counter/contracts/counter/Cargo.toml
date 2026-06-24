@@ -1,0 +1,21 @@
+[package]
+name = "counter"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# `cdylib` for the deployable wasm; `lib` so the stellar-handler crate
+# can import `CounterContractClient` (typed cross-contract calls) at
+# build time. Same pattern as hodlers/Cargo.toml.
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { version = "26", features = ["alloc"] }
+
+[dev-dependencies]
+soroban-sdk = { version = "26", features = ["testutils"] }
+
+[profile.release]
+overflow-checks = true
