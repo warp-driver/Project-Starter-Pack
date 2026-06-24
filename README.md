@@ -402,20 +402,24 @@ rather than re-explaining a pattern that already exists upstream.
 
 ## Project status
 
-**What works today.** End-to-end testnet pipeline for the 01-counter
-example: cron tick → quorum-signed `XlmEnvelope` → `verify_xlm` →
-`counter.tick`. Single-operator and N-of-N multi-operator
-deployments. The vendored ed25519-security / ed25519-verification
-contracts are unchanged from upstream and pass their existing test
-suites. Scripts (`bootstrap-keys`, `op-env`, `upload-component`,
-`middleware`, `new-project`) all run.
+**What works today.** End-to-end testnet pipeline for all three
+examples. `01-counter` covers cron → counter, `02-event-watcher`
+covers Stellar contract event → message-board (same contract owns
+both ends, predict-then-deploy bootstrap), `03-multi-round` covers
+two-round composition with a per-Vectr Round 1 bundle accumulator
+and a quorum-collapsed Round 2 reduce. Single-operator and N-of-N
+multi-operator deployments. The vendored ed25519-security /
+ed25519-verification contracts are unchanged from upstream and pass
+their existing test suites. Scripts (`bootstrap-keys`, `op-env`,
+`upload-component`, `middleware`, `new-project`) all run.
 
-**Planned.** A second example demonstrating a Stellar-event trigger
-(distilled from hodlers-app's circuit), a third demonstrating
-multi-round composition (distilled from oracle-demo). An integration
-test harness that spins up a node, runs a full cron cycle, and
-asserts the counter advances. Frontend skeleton (React + Vite +
-Freighter wiring) once a real example needs one.
+**Planned.** An integration test harness that spins up a node, runs
+a full cron cycle for 01, and asserts the counter advances. A
+frontend skeleton (React + Vite + Freighter wiring) once a real
+example needs one. Additional examples covering EVM bridges,
+atproto firehose triggers, and production observability are still
+best read directly out of the source projects until they're
+distilled.
 
 ## Community
 
