@@ -7,3 +7,5 @@ dist/
 wit-definitions/wit/deps/
 .spec/
 local/
+# Soroban contract test snapshots (regenerated on every `cargo test`)
+**/test_snapshots/
