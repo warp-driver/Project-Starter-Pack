@@ -1,0 +1,36 @@
+[package]
+name = "stellar-handler"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { version = "26", features = ["alloc"] }
+# `warpdrive-shared` is the canonical source for `XlmEnvelope`,
+# `Ed25519SignatureData`, `HandlerError`, and the `Verified` event —
+# every handler in the WarpDrive ecosystem shares these types so
+# circuits and tooling can speak one protocol. Pinned to the same
+# minor version used by hodlers-app / oracle-demo to avoid surprise
+# encoding drift.
+warpdrive-shared = "0.2.4"
+# Build-time dep so we can construct a typed `CounterContractClient`
+# and invoke `tick` without hand-rolling a soroban host call.
+counter = { path = "../counter" }
+
+[dev-dependencies]
+soroban-sdk = { version = "26", features = ["testutils"] }
+warpdrive-shared = { version = "0.2.4", features = ["testutils"] }
+# Real security + verification contracts in tests — the handler's
+# happy-path test deploys the entire on-chain pipeline (security ←
+# verification ← handler ← counter) and exercises a real signed
+# envelope. Mocking the verification layer would let bugs in the
+# envelope encoding hide, which is the most fragile boundary.
+ed25519-verification = { path = "../ed25519-verification" }
+ed25519-security = { path = "../ed25519-security" }
+
+[profile.release]
+overflow-checks = true
