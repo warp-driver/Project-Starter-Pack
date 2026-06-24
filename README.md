@@ -1,12 +1,14 @@
 # WarpDrive Project Starter Pack
 
-A scaffold for Soroban developers building a WarpDrive integration: one
-tiny end-to-end example (cron → quorum-signed envelope → on-chain
-counter), the security contracts that make on-chain quorum verification
-work, and the deploy / wire-up scripts factored out of three real
-WarpDrive apps in production. Clone it, run `./scripts/new-project.sh
-01-counter ../my-thing`, and you have a working integration to iterate
-on instead of a blank repo and a wiki tab.
+A scaffold for Soroban developers building a WarpDrive integration:
+three end-to-end examples covering the three triggers most
+integrations use (cron, Stellar contract event, multi-round
+composition), the security contracts that make on-chain quorum
+verification work, and the deploy / wire-up scripts factored out
+of three real WarpDrive apps in production. Clone it, run
+`./scripts/new-project.sh 01-counter ../my-thing`, and you have a
+working integration to iterate on instead of a blank repo and a
+wiki tab.
 
 ## What this gives you
 
@@ -130,24 +132,24 @@ Project-Starter-Pack/
 │       ├── ed25519-security/       # verbatim from warpdrive-contracts
 │       └── ed25519-verification/
 └── examples/
-    └── 01-counter/                 # MVP starter — cron → counter contract
-        ├── README.md
-        ├── Taskfile.yml
-        ├── warpdrive.toml          # copied from ../../warpdrive.toml.template
-        ├── rust-toolchain.toml
-        ├── contracts/
-        │   ├── counter/            # tick(ts) + count() + last_tick()
-        │   ├── stellar-handler/    # decodes envelope, calls counter.tick
-        │   ├── ed25519-security/   # copy of ../../vendor/contracts/
-        │   └── ed25519-verification/
-        ├── components/
-        │   ├── tick-circuit/       # WASI 0.2: cron → TickPayload { ts }
-        │   └── aggregator/         # WASI 0.2: emits Stellar SubmitAction
-        ├── service/
-        │   └── build-service.sh    # one workflow: cron → tick-circuit → aggregator → handler
-        └── wit-definitions/        # warpdrive-vectr + aggregator worlds
-    ├── 02-event-watcher/           # Stellar event watcher — same layout, set-stellar trigger
-    └── 03-multi-round/              # cron → Round 1 attestation → Round1Ready event → Round 2 reduce → Final
+    ├── 01-counter/                 # cron → counter contract
+    │   ├── README.md
+    │   ├── Taskfile.yml
+    │   ├── warpdrive.toml          # copied from ../../warpdrive.toml.template
+    │   ├── rust-toolchain.toml
+    │   ├── contracts/
+    │   │   ├── counter/            # tick(ts) + count() + last_tick()
+    │   │   ├── stellar-handler/    # decodes envelope, calls counter.tick
+    │   │   ├── ed25519-security/   # copy of ../../vendor/contracts/
+    │   │   └── ed25519-verification/
+    │   ├── components/
+    │   │   ├── tick-circuit/       # WASI 0.2: cron → TickPayload { ts }
+    │   │   └── aggregator/         # WASI 0.2: emits Stellar SubmitAction
+    │   ├── service/
+    │   │   └── build-service.sh    # one workflow: cron → tick-circuit → aggregator → handler
+    │   └── wit-definitions/        # warpdrive-vectr + aggregator worlds
+    ├── 02-event-watcher/           # Stellar contract event → message-board (same layout, set-stellar trigger)
+    └── 03-multi-round/             # cron → Round 1 attestation → Round1Ready event → Round 2 reduce → Final
 ```
 
 Each example is self-contained: its own `Taskfile.yml`,
@@ -386,11 +388,13 @@ actually see the bundle accumulate before `Round1Ready` fires.
 
 ## Where to go for more advanced patterns
 
-Three real WarpDrive apps the pack is distilled from. Each
-demonstrates one extra dimension the 01-counter example deliberately
-leaves out:
+Three real WarpDrive apps the pack is distilled from. They pick up
+where the in-pack examples stop — production multi-host quorum,
+EVM bridges, mainnet event sources, three-round composition with
+real financial math, and the operational tooling that goes with
+running operators for real:
 
-| Project | What it adds on top of the counter |
+| Project | What it adds on top of the in-pack examples |
 |---|---|
 | [hodlers-app](https://github.com/warp-driver/hodlers-app) | Stellar mainnet contract-event trigger; CAS accumulator over `wasi:keyvalue/atomics` for exactly-once delivery when one logical event fires as N concurrent sub-events. Smallest real app. |
 | [oracle-demo](https://github.com/warp-driver/oracle-demo) | Cron + Stellar event + EVM (MetaMask, Sepolia) triggers; 2- and 3-round composition; per-operator vs quorum signing; React frontend talking to both wallets. |
