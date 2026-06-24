@@ -1,0 +1,2 @@
+# wkg-fetched WIT dependencies land here (warpdrive:vectr, warpdrive:aggregator).
+# Populated by `task fetch-wit`; gitignored at the repo root.
